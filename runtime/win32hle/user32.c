@@ -1899,6 +1899,16 @@ static void u_GetAsyncKeyState(void) {
     RET(g_keys[A32(0) & 0xFF] & 0x80 ? 0x8000u : 0u, 1);
 }
 static void u_GetKeyboardState(void) { memcpy(APTR(0), g_keys, 256); RET(1, 1); }
+static void u_GetClipCursor(void) {                       /* (lpRect): the screen, nothing clips here */
+    uint32_t r = A32(0);
+    if (r) MEM32(r) = 0, MEM32(r + 4) = 0, MEM32(r + 8) = (uint32_t)g_screen_w, MEM32(r + 12) = (uint32_t)g_screen_h;
+    RET(1, 1);
+}
+static void u_GetKeyboardType(void) {                     /* (nTypeFlag): an enhanced 101/102-key keyboard */
+    uint32_t t = A32(0);
+    RET(t == 0 ? 4u : t == 2 ? 12u : 0u, 1);
+}
+static void u_IsMenu(void) { RET(A32(0) != 0, 1); }
 static void u_GetCursorPos(void) { if (A32(0)) MEM32(A32(0)) = (uint32_t)g_cursor_x, MEM32(A32(0) + 4) = (uint32_t)g_cursor_y; RET(1, 1); }
 void (*hle_cursor_hook)(int x, int y);                   /* a host that moves its own pointer */
 static void u_SetCursorPos(void) {
@@ -2343,7 +2353,8 @@ const win32hle_shim win32hle_user32[] = {
     { "GetCursor", u_GetCursor }, { "OpenClipboard", u_OpenClipboard }, { "CloseClipboard", u_CloseClipboard },
     { "EmptyClipboard", u_EmptyClipboard }, { "SetClipboardData", u_SetClipboardData }, { "GetClipboardData", u_GetClipboardData },
     { "SetCursor", u_SetCursor }, { "ShowCursor", u_ShowCursor }, { "ClipCursor", u_ClipCursor },
-    { "GetCursorPos", u_GetCursorPos }, { "SetCursorPos", u_SetCursorPos },
+    { "GetCursorPos", u_GetCursorPos }, { "SetCursorPos", u_SetCursorPos }, { "GetClipCursor", u_GetClipCursor },
+    { "GetKeyboardType", u_GetKeyboardType }, { "IsMenu", u_IsMenu },
     { "GetDesktopWindow", u_GetDesktopWindow }, { "GetParent", u_GetParent }, { "GetWindow", u_GetWindow },
     { "GetTopWindow", u_GetTopWindow }, { "EnumChildWindows", u_EnumChildWindows },
     { "GetFocus", u_GetFocus }, { "SetFocus", u_SetFocus }, { "SetCapture", u_SetCapture },

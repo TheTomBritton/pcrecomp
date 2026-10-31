@@ -360,12 +360,9 @@ static void set_mode(int w, int h, int bpp) {
 }
 static void dd_SetDisplayMode(void)  { set_mode((int)A32(1), (int)A32(2), (int)A32(3)); RET(DD_OK, 4); }
 static void dd2_SetDisplayMode(void) { set_mode((int)A32(1), (int)A32(2), (int)A32(3)); RET(DD_OK, 6); }
+static void wait_vblank(void);
 static void dd_WaitForVerticalBlank(void) {              /* (this, flags, event): the next 60 Hz tick */
-    uint32_t now = hle_ticks_ms(), wait = 16 - now % 16;
-    hle_block_begin();
-    struct timespec ts = { 0, (long)wait * 1000000L };
-    nanosleep(&ts, NULL);
-    hle_block_end();
+    wait_vblank();
     RET(DD_OK, 3);
 }
 static void dd2_GetAvailableVidMem(void) {               /* (this, &caps, &total, &free) */
@@ -523,6 +520,7 @@ static void fill(surf_t *d, int l, int t, int r, int b, uint32_t c) {
     mark(d);
 }
 static void sf_Blt(void) {                               /* (this, dstRect, src, srcRect, flags, fx) */
+    if (trace()) fprintf(stderr, "[ddraw] Blt %08X src %08X flags %08X from %08X\n", A32(0), A32(2), A32(4), g_cur_func);
     ACCESS();
     surf_t *d = S(A32(0)), *s = A32(2) ? S(A32(2)) : NULL;
     uint32_t fl = A32(4), fx = A32(5);
@@ -574,18 +572,33 @@ static void sf_EnumAttachedSurfaces(void) {              /* (this, ctx, callback
     RET(DD_OK, 3);
 }
 static void sf_EnumOverlayZOrders(void) { RET(DD_OK, 4); }
+/* The next 60 Hz tick, as the display's vertical blank: Flip waited for it
+ * on the hardware, which is how a game that paces itself by Flip ran at the
+ * refresh rate. Without the wait The House of the Dead ran 57,000 frames a
+ * second and, with no time passing between them, drew nothing. */
+static void wait_vblank(void) {
+    uint32_t now = hle_ticks_ms(), wait = 16 - now % 16;
+    hle_block_begin();
+    struct timespec ts = { 0, (long)wait * 1000000L };
+    nanosleep(&ts, NULL);
+    hle_block_end();
+}
+#define DDFLIP_NOVSYNC 0x00000008u
 static void sf_Flip(void) {                              /* (this, target, flags): swap front and back pixels */
     ACCESS();
     surf_t *s = S(A32(0));
+    if (trace()) fprintf(stderr, "[ddraw] Flip %08X%s target %08X flags %X from %08X\n", A32(0), s == g_primary ? " (primary)" : "", A32(1), A32(2), g_cur_func);
     if (s->back) {
         uint8_t *t = s->px;
         s->px = s->back->px, s->back->px = t;
         mark(s);
     }
+    if (!(A32(2) & DDFLIP_NOVSYNC)) wait_vblank();
     RET(DD_OK, 3);
 }
 static void sf_GetAttachedSurface(void) {                /* (this, &caps, &out) */
     surf_t *s = S(A32(0)), *a;
+    if (trace()) fprintf(stderr, "[ddraw] GetAttachedSurface %08X caps %08X from %08X\n", A32(0), A32(1) ? MEM32(A32(1)) : 0, g_cur_func);
     uint32_t want = A32(1) ? MEM32(A32(1)) : 0;
     a = want & DDSCAPS_ZBUFFER ? s->zbuf : want & DDSCAPS_MIPMAP ? s->mip : s->back;
     if (!a) { MEM32(A32(2)) = 0; RET(DDERR_NOTFOUND, 3); }
@@ -628,6 +641,7 @@ static void sf_Initialize(void) { RET(DD_OK, 3); }
 static void sf_Lock(void) {                              /* (this, rect, &desc, flags, event) */
     ACCESS();
     surf_t *s = S(A32(0));
+    if (trace()) fprintf(stderr, "[ddraw] Lock %08X%s%s from %08X\n", A32(0), s == g_primary ? " (primary)" : "", g_primary && s == g_primary->back ? " (back)" : "", g_cur_func);
     s->gen++;                                            /* whatever the game writes, from now */
     uint32_t d = A32(2);
     if (!d) RET(DDERR_INVALIDPARAMS, 5);
@@ -665,6 +679,7 @@ static void sf_SetPalette(void) {
 }
 static void sf_Unlock(void) {
     surf_t *s = S(A32(0));
+    if (trace()) fprintf(stderr, "[ddraw] Unlock %08X from %08X\n", A32(0), g_cur_func);
     if (s->locks) s->locks--;
     mark(s);
     RET(DD_OK, 2);

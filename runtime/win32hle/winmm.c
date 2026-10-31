@@ -97,6 +97,32 @@ static void m_timeKillEvent(void) {
 static void m_timeEndPeriod(void)   { RET(MMSYSERR_NOERROR, 1); }
 
 /* --- joystick: none present, so the game takes its keyboard/mouse path --- */
+/* --- aux: one CD audio output, its volume a host may follow (the disc's music) --- */
+void (*hle_winmm_aux_volume_hook)(uint32_t volume);
+static uint32_t g_aux_volume = 0xFFFFFFFFu;                /* left in the low word, right in the high: full */
+static void m_auxGetNumDevs(void)   { RET(1, 0); }
+static void m_auxGetDevCapsA(void) {                       /* (uDeviceID, lpCaps, cbCaps): AUXCAPSA */
+    uint32_t id = A32(0), caps = A32(1), n = A32(2);
+    if (id != 0 || !caps) RET(2u /* MMSYSERR_BADDEVICEID */, 3);
+    uint8_t *p = (uint8_t *)hle_ptr(caps);
+    memset(p, 0, n);
+    if (n >= 8) { MEM16(caps) = 1; MEM16(caps + 2) = 1; MEM32(caps + 4) = 0x0100; }
+    if (n >= 40) strcpy((char *)p + 8, "CD Audio");
+    if (n >= 42) MEM16(caps + 40) = 1;                     /* AUXCAPS_CDAUDIO */
+    if (n >= 48) MEM32(caps + 44) = 3;                     /* AUXCAPS_VOLUME | AUXCAPS_LRVOLUME */
+    RET(MMSYSERR_NOERROR, 3);
+}
+static void m_auxGetVolume(void) {                         /* (uDeviceID, lpdwVolume) */
+    if (A32(0) != 0) RET(2u, 2);
+    if (A32(1)) MEM32(A32(1)) = g_aux_volume;
+    RET(MMSYSERR_NOERROR, 2);
+}
+static void m_auxSetVolume(void) {                         /* (uDeviceID, dwVolume) */
+    if (A32(0) != 0) RET(2u, 2);
+    g_aux_volume = A32(1);
+    if (hle_winmm_aux_volume_hook) hle_winmm_aux_volume_hook(g_aux_volume);
+    RET(MMSYSERR_NOERROR, 2);
+}
 static void m_joyGetNumDevs(void)   { RET(0, 0); }
 static void m_joyGetDevCapsA(void)  { RET(JOYERR_UNPLUGGED, 3); }
 static void m_joyGetPos(void)       { RET(JOYERR_UNPLUGGED, 2); }
@@ -323,6 +349,10 @@ const win32hle_shim win32hle_winmm[] = {
     { "waveInUnprepareHeader",  m_badhandle3 },
     { "waveInAddBuffer",        m_badhandle3 },
     { "waveInGetPosition",      m_badhandle3 },
+    { "auxGetNumDevs",          m_auxGetNumDevs },
+    { "auxGetDevCapsA",         m_auxGetDevCapsA },
+    { "auxGetVolume",           m_auxGetVolume },
+    { "auxSetVolume",           m_auxSetVolume },
     { "mciSendStringA",         m_mciSendStringA },
     { "mciGetErrorStringA",     m_mciGetErrorStringA },
     { 0, 0 }

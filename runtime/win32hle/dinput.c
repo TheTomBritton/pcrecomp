@@ -168,8 +168,8 @@ static void dev_GetCapabilities(void) {                   /* (this, lpDIDevCaps)
     didev_t *d = D(A32(0));
     uint32_t c = A32(1);
     if (!c) RET(DIERR_INVALIDPARAM, 2);
-    uint32_t size = MEM32(c);
-    if (size < 44) RET(DIERR_INVALIDPARAM, 2);
+    uint32_t size = MEM32(c);                             /* DIDEVCAPS_DX3 is 24 bytes, DirectX 5's 44 */
+    if (size < 24) RET(DIERR_INVALIDPARAM, 2);
     for (uint32_t i = 4; i < size && i < 60; i += 4) MEM32(c + i) = 0;
     MEM32(c + 4) = DIDC_ATTACHED | DIDC_EMULATED;
     MEM32(c + 8) = d->kind == DEV_MOUSE ? (DIDEVTYPE_MOUSE | (2u << 8)) : (DIDEVTYPE_KEYBOARD | (4u << 8));

@@ -282,6 +282,9 @@ static void k_QueryPerformanceCounter(void) {
 }
 /* Sleep gives the machine up for the wait, so another guest thread (a mixer,
  * a timer callback) runs meanwhile. Sleep(0) is a yield. */
+/* TerminateThread(h, code): answered done; a thread this host runs ends on
+ * its own (a game calls it on the way out, for a worker already waiting). */
+static void k_TerminateThread(void) { RET(1, 2); }
 static void k_Sleep(void) {
     uint32_t ms = A32(0);
     hle_block_begin();
@@ -605,6 +608,7 @@ const win32hle_shim win32hle_kernel32[] = {
     { "QueryPerformanceFrequency", k_QueryPerformanceFrequency },
     { "QueryPerformanceCounter",   k_QueryPerformanceCounter },
     { "Sleep",              k_Sleep },
+    { "TerminateThread",    k_TerminateThread },
     { "SleepEx",            k_SleepEx },
     { "GetLastError",       k_GetLastError },
     { "SetLastError",       k_SetLastError },

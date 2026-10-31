@@ -299,6 +299,7 @@ extern uint32_t (*hle_dd_surface_qi_hook)(uint32_t surface, const uint8_t *iid);
 /* The same for IDirectDraw::QueryInterface (IDirect3D3, say). */
 extern uint32_t (*hle_dd_qi_hook)(const uint8_t *iid);
 /* ---- DirectInput (dinput.c): a system mouse and keyboard from user32's state ---- */
+extern void (*hle_winmm_aux_volume_hook)(uint32_t volume);   /* auxSetVolume on the CD audio output: left low word, right high */
 void win32hle_register_dinput(void);                 /* DirectInputCreateA/W/Ex (recomp_host_init) */
 extern void (*hle_dinput_mouse_hook)(int x, int y, int *dx, int *dy);   /* a host's say over the mouse motion reported */
 extern int g_dinput_trace;

@@ -84,7 +84,13 @@ static int pe_map_at(const char *path, pe_image *img, int anywhere) {
     memcpy(hle_ptr(base), file, opt->SizeOfHeaders);
     pe_section_header *sec = (pe_section_header *)((uint8_t *)&nt->OptionalHeader + nt->FileHeader.SizeOfOptionalHeader);
     for (int i = 0; i < nt->FileHeader.NumberOfSections; i++) {
-        uint32_t copy = sec[i].SizeOfRawData < sec[i].VirtualSize ? sec[i].SizeOfRawData : sec[i].VirtualSize;
+        /* A VirtualSize of 0 means "the raw size" (Watcom's linker writes 0 for
+         * every section; Windows loads them by SizeOfRawData), and a section
+         * with no raw data (PointerToRawData 0: Watcom's .bss, which still
+         * states a SizeOfRawData) is the zeroes the reservation already is. */
+        uint32_t vsize = sec[i].VirtualSize ? sec[i].VirtualSize : sec[i].SizeOfRawData;
+        uint32_t copy = sec[i].SizeOfRawData < vsize ? sec[i].SizeOfRawData : vsize;
+        if (!sec[i].PointerToRawData) copy = 0;
         if (copy && (size_t)sec[i].PointerToRawData + copy <= flen)
             memcpy(hle_ptr(base + sec[i].VirtualAddress), file + sec[i].PointerToRawData, copy);
     }

@@ -140,12 +140,15 @@ static void k_CreateFileA(void) {
         RET(INVALID_HANDLE, 7);
     }
     int fd = open(path, fl | O_CLOEXEC, 0644);
-    if (hle_filetrace())
-        fprintf(stderr, "[file] CreateFileA \"%s\" -> %s %s\n", name, path, fd >= 0 ? "ok" : strerror(errno));
-    if (fd < 0) { hle_set_last_error(errno_to_win(errno)); RET(INVALID_HANDLE, 7); }
+    if (fd < 0) {
+        if (hle_filetrace()) fprintf(stderr, "[file] CreateFileA \"%s\" -> %s %s\n", name, path, strerror(errno));
+        hle_set_last_error(errno_to_win(errno)); RET(INVALID_HANDLE, 7);
+    }
     if ((fl & O_CREAT) && !exists) hle_path_changed();
     hle_set_last_error(exists && (disp == 2 || disp == 4) ? ERROR_ALREADY_EXISTS : 0);
-    RET(new_file(fd), 7);
+    uint32_t h = new_file(fd);
+    if (hle_filetrace()) fprintf(stderr, "[file] CreateFileA \"%s\" -> %s ok h%u\n", name, path, h);
+    RET(h, 7);
 }
 
 static void k_ReadFile(void) {                           /* (h,buf,n,&read,ovl) */
@@ -154,6 +157,7 @@ static void k_ReadFile(void) {                           /* (h,buf,n,&read,ovl) 
     uint32_t n = A32(2), *pr = (uint32_t *)APTR(3), got = 0;
     if (pr) *pr = 0;
     if (fd < 0) { hle_set_last_error(ERROR_INVALID_HANDLE); RET(0, 5); }
+    off_t at = hle_filetrace() ? lseek(fd, 0, SEEK_CUR) : 0;
     while (got < n) {
         ssize_t r = read(fd, buf + got, n - got);
         if (r < 0 && errno == EINTR) continue;
@@ -161,6 +165,11 @@ static void k_ReadFile(void) {                           /* (h,buf,n,&read,ovl) 
         got += (uint32_t)r;
     }
     if (pr) *pr = got;
+    if (hle_filetrace()) {                               /* the bytes delivered, hashed, so a read can be checked against the file */
+        uint32_t h = 0x811c9dc5u;
+        for (uint32_t i = 0; i < got; i++) { h ^= buf[i]; h *= 0x01000193u; }
+        fprintf(stderr, "[file] ReadFile h%u at %lld n %u -> %u fnv %08x\n", A32(0), (long long)at, n, got, h);
+    }
     RET(1, 5);                                           /* EOF is success with 0 read */
 }
 static void k_WriteFile(void) {                          /* (h,buf,n,&written,ovl) */
@@ -187,6 +196,7 @@ static void k_SetFilePointer(void) {                     /* (h,dist,&distHigh,me
     if (r < 0) { hle_set_last_error(fd < 0 ? ERROR_INVALID_HANDLE : 131u /* NEGATIVE_SEEK */); RET(INVALID_HANDLE, 4); }
     if (hi) *hi = (uint32_t)((uint64_t)r >> 32);
     hle_set_last_error(0);
+    if (hle_filetrace()) fprintf(stderr, "[file] SetFilePointer h%u %lld method %u -> %lld\n", A32(0), (long long)dist, method, (long long)r);
     RET((uint32_t)r, 4);
 }
 static void k_SetEndOfFile(void) {

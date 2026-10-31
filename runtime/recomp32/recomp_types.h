@@ -1164,6 +1164,18 @@ recomp_func_t recomp_lookup_import(uint32_t va);    /* import bridges */
     g_cur_func = _caller;  /* the callee RECOMP_ENTER clobbered it */ \
 } while(0)
 
+/* An unresolved indirect target is reported the first time it is seen (a
+ * miss inside a game's main loop printed millions of lines a second, which
+ * was the run). The table is small; past it every miss reports. */
+#define RECOMP_UNRESOLVED_SEEN 64
+RECOMP_WEAK uint32_t g_unresolved_seen[RECOMP_UNRESOLVED_SEEN];
+RECOMP_WEAK uint32_t g_unresolved_n;
+static inline int recomp_unresolved_report(uint32_t va) {
+    for (uint32_t i = 0; i < g_unresolved_n && i < RECOMP_UNRESOLVED_SEEN; i++) if (g_unresolved_seen[i] == va) return 0;
+    if (g_unresolved_n < RECOMP_UNRESOLVED_SEEN) g_unresolved_seen[g_unresolved_n++] = va;
+    return 1;
+}
+
 /* Indirect call through dispatch */
 #define RECOMP_ICALL(target_va) do { \
     uint32_t _va = (uint32_t)(target_va); \
@@ -1187,7 +1199,8 @@ recomp_func_t recomp_lookup_import(uint32_t va);    /* import bridges */
          * `esp += 4` here shifted the caller's stack by one slot per miss. \
          * (Nocturne's CRT init runner lost its saved registers that way and \
          * skipped ~90 static constructors after its first unlifted entry.) */ \
-        fprintf(stderr, "ICALL: unresolved VA 0x%08X from 0x%08X\n", _va, g_cur_func); \
+        if (recomp_unresolved_report(_va)) \
+            fprintf(stderr, "ICALL: unresolved VA 0x%08X from 0x%08X\n", _va, g_cur_func); \
         eax = 0; \
     } \
 } while(0)
@@ -1205,7 +1218,7 @@ recomp_func_t recomp_lookup_import(uint32_t va);    /* import bridges */
     if (_fn) { RECOMP_FLAGS_OUT(); RECOMP_REGS_OUT(); _fn(); RECOMP_REGS_IN(); } \
     else if (_va == RECOMP_RETADDR) { /* setjmp and friends return by jumping \
         to the saved return address; that is a return, not a missing target. */ } \
-    else { fprintf(stderr, "ITAIL: unresolved VA 0x%08X from 0x%08X\n", _va, g_cur_func); } \
+    else { if (recomp_unresolved_report(_va)) fprintf(stderr, "ITAIL: unresolved VA 0x%08X from 0x%08X\n", _va, g_cur_func); } \
 } while(0)
 
 /* `push target; ret` (Lifter dos=True): a jump to a computed address. Its own
