@@ -745,6 +745,8 @@ void hle_input_key(int down, uint32_t vk, uint32_t scan) {
     if (t) q_push(t, alt || vk == VK_MENU || vk == 0x79 ? (down ? WM_SYSKEYDOWN : WM_SYSKEYUP) : (down ? WM_KEYDOWN : WM_KEYUP), vk, l);
 }
 void hle_input_cursor(int sx, int sy) { g_cursor_x = sx, g_cursor_y = sy; }
+void hle_cursor_get(int *sx, int *sy) { *sx = g_cursor_x, *sy = g_cursor_y; }
+int  hle_key_down(uint32_t vk) { return (g_keys[vk & 0xFF] & 0x80) != 0; }
 void hle_input_key_state(uint32_t vk, int down) { if (down) g_keys[vk & 0xFF] |= 0x80; else g_keys[vk & 0xFF] &= 1; }
 
 /* ---- DefWindowProc ---- */

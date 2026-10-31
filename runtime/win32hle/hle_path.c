@@ -270,7 +270,32 @@ int hle_host_path_for_write(const char *guest, char *out, size_t n, int keep) {
 
 static int host_path_plain(const char *guest, char *out, size_t n);
 
+/* Guest paths a host hides: hle_host_path answers "not there" for them and
+ * hands back an empty host path, which no open can use. The House of the
+ * Dead takes the first CD-ROM drive whose root has no thotd.exe for its
+ * disc; the virtual disc is the game folder, which has one. */
+#define MAX_HIDDEN 8
+static char g_hidden[MAX_HIDDEN][260];
+static int g_nhidden;
+void hle_path_hide(const char *guest) {
+    if (g_nhidden < MAX_HIDDEN && guest && strlen(guest) < 260) snprintf(g_hidden[g_nhidden++], 260, "%s", guest);
+}
+static int hidden(const char *guest) {
+    for (int i = 0; i < g_nhidden; i++) {
+        const char *a = g_hidden[i], *b = guest;
+        while (*a && *b) {
+            char ca = *a == '/' ? '\\' : (char)((*a >= 'A' && *a <= 'Z') ? *a + 32 : *a);
+            char cb = *b == '/' ? '\\' : (char)((*b >= 'A' && *b <= 'Z') ? *b + 32 : *b);
+            if (ca != cb) break;
+            a++, b++;
+        }
+        if (!*a && !*b) return 1;
+    }
+    return 0;
+}
+
 int hle_host_path(const char *guest, char *out, size_t n) {
+    if (guest && g_nhidden && hidden(guest)) { out[0] = 0; return 0; }
     int exists = host_path_plain(guest, out, n);
     char ov[1024];
     struct stat st;

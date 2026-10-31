@@ -223,7 +223,7 @@ static void present(void) {
      * in one of two buffers (the page reads it later); the place in the
      * window is this thread's, so the mouse maps the same way. SDL still
      * draws the host's menu (F10), over which the page's canvas hides. */
-    if (bpp == 16) {
+    if (bpp == 16 || (bpp == 8 && pal)) {
         int ww, wh;
         SDL_GetRendererOutputSize(g_ren, &ww, &wh);
         if ((long long)ww * h > (long long)wh * w) g_dst.h = wh, g_dst.w = (int)((long long)wh * w / h);
@@ -248,7 +248,20 @@ static void present(void) {
             which ^= 1;
             uint16_t *dst = fb[which];
             if (dst) {
-                for (int y = 0; y < h; y++) memcpy(dst + (size_t)y * w, px + (size_t)y * pitch, (size_t)w * 2);
+                if (bpp == 16) {
+                    for (int y = 0; y < h; y++) memcpy(dst + (size_t)y * w, px + (size_t)y * pitch, (size_t)w * 2);
+                } else {                                     /* 8-bit: through the palette (PALETTEENTRY r, g, b) */
+                    uint16_t lut[256];
+                    for (int i = 0; i < 256; i++) {
+                        uint32_t e = pal[i];
+                        lut[i] = (uint16_t)(((e & 0xF8) << 8) | ((e >> 8 & 0xFC) << 3) | (e >> 16 & 0xFF) >> 3);
+                    }
+                    for (int y = 0; y < h; y++) {
+                        const uint8_t *row = px + (size_t)y * pitch;
+                        uint16_t *o = dst + (size_t)y * w;
+                        for (int x = 0; x < w; x++) o[x] = lut[row[x]];
+                    }
+                }
                 web_menu(0);
                 web_present(dst, w, h, g_dst.x, g_dst.y, g_dst.w, g_dst.h, g_mode, ww, wh);
             }

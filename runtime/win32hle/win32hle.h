@@ -158,6 +158,8 @@ void     hle_input_mouse(uint32_t message, int screen_x, int screen_y);   /* WM_
 void     hle_input_key(int down, uint32_t vk, uint32_t scan);
 void     hle_input_cursor(int screen_x, int screen_y);                    /* GetCursorPos, without a message */
 void     hle_input_key_state(uint32_t vk, int down);                      /* GetKeyState, without a message */
+void     hle_cursor_get(int *screen_x, int *screen_y);                    /* the cursor, for a host or dinput.c */
+int      hle_key_down(uint32_t vk);                                       /* GetAsyncKeyState's bit, for a host or dinput.c */
 uint32_t hle_window_at(int screen_x, int screen_y, int *client_x, int *client_y);
 uint32_t hle_focus_window(void);
 uint32_t hle_send(uint32_t hwnd, uint32_t msg, uint32_t wParam, uint32_t lParam);   /* SendMessageA */
@@ -209,6 +211,7 @@ void     hle_handle_set_closer(int type, void (*fn)(void *));
  * (Z: is /), either slash separates, and components match without case.
  * hle_host_path returns 1 when the path exists. */
 void hle_set_drive(char letter, const char *host_root);
+void hle_path_hide(const char *guest);       /* this guest path is not there (hle_host_path), whatever the disk holds */
 int  hle_host_path(const char *guest, char *out, size_t n);
 /* A mod's folder over the game's: reads look in overlay first, writes go
  * there, directory listings show both (hle_path.c). NULL turns it off. */
@@ -295,6 +298,10 @@ void hle_dsound_set_master(float gain);              /* 0 mutes */
 extern uint32_t (*hle_dd_surface_qi_hook)(uint32_t surface, const uint8_t *iid);
 /* The same for IDirectDraw::QueryInterface (IDirect3D3, say). */
 extern uint32_t (*hle_dd_qi_hook)(const uint8_t *iid);
+/* ---- DirectInput (dinput.c): a system mouse and keyboard from user32's state ---- */
+void win32hle_register_dinput(void);                 /* DirectInputCreateA/W/Ex (recomp_host_init) */
+extern void (*hle_dinput_mouse_hook)(int x, int y, int *dx, int *dy);   /* a host's say over the mouse motion reported */
+extern int g_dinput_trace;
 void hle_dsound_register_com(void);                  /* CoCreateInstance(CLSID_DirectSound) (recomp_host_init) */
 /* A host's own sound (a movie's), mixed with the game's buffers: interleaved
  * s16 pushed at its own rate. */
