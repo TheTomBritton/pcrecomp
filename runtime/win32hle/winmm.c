@@ -23,10 +23,7 @@
 #define WHDR_INQUEUE      0x00000010u
 
 /* --- multimedia timer --- */
-static void m_timeGetTime(void) {
-    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
-    RET((uint32_t)(ts.tv_sec * 1000u + ts.tv_nsec / 1000000u), 0);
-}
+static void m_timeGetTime(void) { RET(hle_ticks_ms(), 0); }   /* the same count as GetTickCount (kernel32.c) */
 static void m_timeBeginPeriod(void) { RET(MMSYSERR_NOERROR, 1); }
 static void m_timeGetDevCaps(void) {           /* (&TIMECAPS, size) */
     if (A32(0) && A32(1) >= 8) MEM32(A32(0)) = 1, MEM32(A32(0) + 4) = 1000000;

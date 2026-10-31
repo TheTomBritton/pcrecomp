@@ -267,9 +267,18 @@ static void k_FlushInstructionCache(void) { RET(1, 3); }
 static void k_IsProcessorFeaturePresent(void) { RET(0, 1); }
 
 /* --- time --- */
+/* Milliseconds as GetTickCount and timeGetTime give them: since the machine
+ * came up, so a small number. Counted from the first call here (plus a
+ * minute and a half, as a machine that just booted), not from the host
+ * clock's epoch: in a browser CLOCK_MONOTONIC stood at 2.49 billion ms, and
+ * a game's signed "now - then < 16" (The House of the Dead's 60 Hz wait)
+ * never came true. */
 static uint32_t ticks_ms(void) {
+    static uint64_t base;
     struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
+    uint64_t now = (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+    if (!base) base = now - 90000u;
+    return (uint32_t)(now - base);
 }
 uint32_t hle_ticks_ms(void) { return ticks_ms(); }
 static void k_GetTickCount(void) { RET(ticks_ms(), 0); }
