@@ -1,7 +1,9 @@
 /*
  * d3d.c - Direct3D as DirectX 6 has it (IDirect3D3, IDirect3DDevice3 and
- * their viewports, materials, textures and vertex buffers), drawn in
- * software by d3d_raster.c into the DirectDraw surfaces of ddraw.c.
+ * their viewports, materials, textures and vertex buffers), and as DirectX 5
+ * had it (IDirect3D2, IDirect3DDevice2, IDirect3DMaterial2: the same objects
+ * behind the older vtables), drawn in software by d3d_raster.c into the
+ * DirectDraw surfaces of ddraw.c.
  *
  * One device is offered, a "HAL" with hardware rasterisation as a 1999 game
  * expects to find, and texture formats 565, 1555, 4444 and 8888. Vertices
@@ -31,6 +33,8 @@ static int trace(void) { if (g_trace < 0) g_trace = getenv("HLE_D3DTRACE") != NU
 
 static uint32_t g_vt_d3d, g_vt_dev, g_vt_vp, g_vt_tex, g_vt_mat, g_vt_vb, g_vt_light;
 static uint32_t g_d3d;                                   /* the one IDirect3D3 */
+static uint32_t g_vt_d3d2, g_vt_dev2, g_d3d2;            /* DirectX 5's faces of the same objects */
+static void vtables(void);
 
 /* ---- the device ---- */
 #define NRS 256
@@ -494,6 +498,9 @@ static void dv_SetRenderState(void) {
     uint32_t s = A32(1), v = A32(2);
     if (s < NRS) d->rs[s] = v;
     if (s == 1) d->tex[0] = v;                           /* TEXTUREHANDLE: the texture object */
+    if (s == 3) d->tss[0][13] = d->tss[0][14] = v;       /* TEXTUREADDRESS (DirectX 5): both ways */
+    if (s == 44) d->tss[0][13] = v;                      /* TEXTUREADDRESSU */
+    if (s == 45) d->tss[0][14] = v;                      /* TEXTUREADDRESSV */
     if (s == 21) {                                       /* TEXTUREMAPBLEND, as stage 0's operations */
         uint32_t *t = d->tss[0];
         switch (v) {
@@ -711,6 +718,94 @@ static void dv_Vertex(void) {
 }
 static void dv_End(void) { draw(DEV(A32(0)), g_imm_type, g_imm_fvf, g_imm, g_imm_n, NULL, 0); RET(D3D_OK, 2); }
 
+/* ---- DirectX 5: IDirect3D2, IDirect3DDevice2, IDirect3DMaterial2 ----
+ * The same device, viewports, textures and materials behind the older
+ * vtables (IDirect3DMaterial2 and IDirect3DTexture2 already have their later
+ * layout; only IDirect3DMaterial and IDirect3DTexture had Initialize). A
+ * 1998 game draws D3DVERTEXTYPE vertices (D3DVERTEX, D3DLVERTEX,
+ * D3DTLVERTEX: 32 bytes each), selects its texture by handle
+ * (SetRenderState TEXTUREHANDLE), and may gather Begin/Vertex/End or
+ * BeginIndexed/Index/End. */
+static uint32_t fvf_of_vtype(uint32_t vt) {
+    return vt == 1 ? 0x112u : vt == 2 ? 0x1E2u : vt == 3 ? 0x1C4u : vt;   /* XYZ|NORMAL|TEX1, XYZ|RESERVED1|DIFFUSE|SPECULAR|TEX1, XYZRHW|DIFFUSE|SPECULAR|TEX1 */
+}
+static void d32_QueryInterface(void) {
+    uint32_t d1 = MEM32(A32(1));
+    if (d1 == 0 || d1 == 0x6AAE1EC1u) { MEM32(A32(2)) = A32(0); MEM32(A32(0) + 4)++; RET(D3D_OK, 3); }
+    if (d1 == 0xBB223240u) { MEM32(A32(2)) = g_d3d; MEM32(g_d3d + 4)++; RET(D3D_OK, 3); }
+    char s[40];
+    hle_guid_string((const uint8_t *)APTR(1), s);
+    T("IDirect3D2::QueryInterface %s: not served\n", s);
+    MEM32(A32(2)) = 0;
+    RET(E_NOINTERFACE, 3);
+}
+static void d32_CreateDevice(void) {                     /* (this, guid, surface, &device) */
+    d3ddev_t *d = (d3ddev_t *)hle_alloc(sizeof *d);
+    dev_reset(d);
+    d->target = A32(2);
+    if (A32(2)) MEM32(A32(2) + 4)++;
+    surf_t *t = hle_dd_surf(A32(2));
+    if (t && !t->zbuf) d->rs[7] = 0;
+    uint32_t o = new_obj(g_vt_dev2, hle_va(d));
+    d->self = o;
+    hle_dd_access_hook = d3d_raster_flush;
+    fprintf(stderr, "[d3d] CreateDevice (DirectX 5) %dx%d%s\n", t ? t->w : 0, t ? t->h : 0, t && t->zbuf ? " with a z-buffer" : "");
+    MEM32(A32(3)) = o;
+    RET(D3D_OK, 4);
+}
+static void dv2_QueryInterface(void) {
+    uint32_t d1 = MEM32(A32(1));
+    if (d1 == 0 || d1 == 0x93281501u) { MEM32(A32(2)) = A32(0); MEM32(A32(0) + 4)++; RET(D3D_OK, 3); }
+    MEM32(A32(2)) = 0;
+    RET(E_NOINTERFACE, 3);
+}
+static void dv2_GetDirect3D(void) { MEM32(A32(1)) = g_d3d2; MEM32(g_d3d2 + 4)++; RET(D3D_OK, 2); }
+static void dv2_EnumTextureFormats(void) {               /* (this, callback(DDSURFACEDESC *, ctx), ctx) */
+    static const uint32_t f[][6] = {
+        { 0x40, 16, 0xF800, 0x07E0, 0x001F, 0 },                         /* RGB 565 */
+        { 0x41, 16, 0x7C00, 0x03E0, 0x001F, 0x8000 },                   /* ARGB 1555 */
+        { 0x41, 16, 0x0F00, 0x00F0, 0x000F, 0xF000 },                   /* ARGB 4444 */
+        { 0x41, 32, 0xFF0000, 0xFF00, 0xFF, 0xFF000000u },              /* ARGB 8888 */
+    };
+    uint32_t mark = hle_scratch_mark(), sd = hle_scratch(108);
+    for (int i = 0; i < 4; i++) {
+        memset(hle_ptr(sd), 0, 108);
+        MEM32(sd) = 108, MEM32(sd + 4) = 0x1u | 0x1000u;   /* DDSD_CAPS | DDSD_PIXELFORMAT */
+        put_pixfmt(sd + 72, f[i][0], (int)f[i][1], f[i][2], f[i][3], f[i][4], f[i][5]);
+        MEM32(sd + 104) = 0x1000u;                       /* DDSCAPS_TEXTURE */
+        uint32_t a[2] = { sd, A32(2) };
+        if (!hle_call_guest(A32(1), 2, a)) break;        /* D3DENUMRET_CANCEL */
+    }
+    hle_scratch_release(mark);
+    RET(D3D_OK, 3);
+}
+static uint32_t g_imm_src, g_imm_src_n, g_imm_idx_n;    /* BeginIndexed: the game's vertices, our indices */
+static uint16_t g_imm_idx[65536];
+static void dv2_Begin(void) {                            /* (this, ptype, vtype, flags) */
+    g_imm_type = A32(1), g_imm_fvf = fvf_of_vtype(A32(2)), g_imm_n = 0, g_imm_src = 0;
+    RET(D3D_OK, 4);
+}
+static void dv2_BeginIndexed(void) {                     /* (this, ptype, vtype, verts, nverts, flags) */
+    g_imm_type = A32(1), g_imm_fvf = fvf_of_vtype(A32(2)), g_imm_src = A32(3), g_imm_src_n = A32(4), g_imm_idx_n = 0, g_imm_n = 0;
+    RET(D3D_OK, 6);
+}
+static void dv2_Index(void) { if (g_imm_idx_n < 65536) g_imm_idx[g_imm_idx_n++] = (uint16_t)A32(1); RET(D3D_OK, 2); }
+static void dv2_End(void) {
+    d3ddev_t *d = DEV(A32(0));
+    if (g_imm_src) draw(d, g_imm_type, g_imm_fvf, (const uint8_t *)hle_ptr(g_imm_src), g_imm_src_n, g_imm_idx, g_imm_idx_n);
+    else draw(d, g_imm_type, g_imm_fvf, g_imm, g_imm_n, NULL, 0);
+    g_imm_src = 0;
+    RET(D3D_OK, 2);
+}
+static void dv2_DrawPrimitive(void) {                    /* (this, ptype, vtype, verts, count, flags) */
+    draw(DEV(A32(0)), A32(1), fvf_of_vtype(A32(2)), (const uint8_t *)APTR(3), A32(4), NULL, 0);
+    RET(D3D_OK, 6);
+}
+static void dv2_DrawIndexedPrimitive(void) {             /* (this, ptype, vtype, verts, nverts, idx, nidx, flags) */
+    draw(DEV(A32(0)), A32(1), fvf_of_vtype(A32(2)), (const uint8_t *)APTR(3), A32(4), (const uint16_t *)APTR(5), A32(6));
+    RET(D3D_OK, 8);
+}
+
 /* ---- vertex buffers ---- */
 static void vb_Release(void) {
     uint32_t self = A32(0), n = --MEM32(self + 4);
@@ -804,7 +899,38 @@ static void vtables(void) {
         { "IDirect3DVertexBuffer::Unlock", ok1 }, { "IDirect3DVertexBuffer::ProcessVertices", ok1 },
         { "IDirect3DVertexBuffer::GetVertexBufferDesc", vb_GetVertexBufferDesc },
         { "IDirect3DVertexBuffer::Optimize", ok3 }, { 0, 0 } };
+    static const win32hle_shim d32[] = {
+        { "IDirect3D2::QueryInterface", d32_QueryInterface }, { "IDirect3D2::AddRef", hle_com_AddRef },
+        { "IDirect3D2::Release", d3_Release }, { "IDirect3D2::EnumDevices", d3_EnumDevices },
+        { "IDirect3D2::CreateLight", d3_CreateLight }, { "IDirect3D2::CreateMaterial", d3_CreateMaterial },
+        { "IDirect3D2::CreateViewport", d3_CreateViewport }, { "IDirect3D2::FindDevice", d3_FindDevice },
+        { "IDirect3D2::CreateDevice", d32_CreateDevice }, { 0, 0 } };
+    static const win32hle_shim dv2[] = {
+        { "IDirect3DDevice2::QueryInterface", dv2_QueryInterface }, { "IDirect3DDevice2::AddRef", hle_com_AddRef },
+        { "IDirect3DDevice2::Release", dv_Release }, { "IDirect3DDevice2::GetCaps", dv_GetCaps },
+        { "IDirect3DDevice2::SwapTextureHandles", ok3 }, { "IDirect3DDevice2::GetStats", dv_GetStats },
+        { "IDirect3DDevice2::AddViewport", dv_AddViewport }, { "IDirect3DDevice2::DeleteViewport", dv_DeleteViewport },
+        { "IDirect3DDevice2::NextViewport", dv_NextViewport },
+        { "IDirect3DDevice2::EnumTextureFormats", dv2_EnumTextureFormats },
+        { "IDirect3DDevice2::BeginScene", dv_BeginScene }, { "IDirect3DDevice2::EndScene", dv_EndScene },
+        { "IDirect3DDevice2::GetDirect3D", dv2_GetDirect3D },
+        { "IDirect3DDevice2::SetCurrentViewport", dv_SetCurrentViewport },
+        { "IDirect3DDevice2::GetCurrentViewport", dv_GetCurrentViewport },
+        { "IDirect3DDevice2::SetRenderTarget", dv_SetRenderTarget },
+        { "IDirect3DDevice2::GetRenderTarget", dv_GetRenderTarget },
+        { "IDirect3DDevice2::Begin", dv2_Begin }, { "IDirect3DDevice2::BeginIndexed", dv2_BeginIndexed },
+        { "IDirect3DDevice2::Vertex", dv_Vertex }, { "IDirect3DDevice2::Index", dv2_Index },
+        { "IDirect3DDevice2::End", dv2_End },
+        { "IDirect3DDevice2::GetRenderState", dv_GetRenderState }, { "IDirect3DDevice2::SetRenderState", dv_SetRenderState },
+        { "IDirect3DDevice2::GetLightState", dv_GetLightState }, { "IDirect3DDevice2::SetLightState", ok3 },
+        { "IDirect3DDevice2::SetTransform", dv_SetTransform }, { "IDirect3DDevice2::GetTransform", dv_GetTransform },
+        { "IDirect3DDevice2::MultiplyTransform", dv_MultiplyTransform },
+        { "IDirect3DDevice2::DrawPrimitive", dv2_DrawPrimitive },
+        { "IDirect3DDevice2::DrawIndexedPrimitive", dv2_DrawIndexedPrimitive },
+        { "IDirect3DDevice2::SetClipStatus", ok2 }, { "IDirect3DDevice2::GetClipStatus", ok2 }, { 0, 0 } };
     g_vt_d3d = hle_com_vtable(d3);
+    g_vt_d3d2 = hle_com_vtable(d32);
+    g_vt_dev2 = hle_com_vtable(dv2);
     g_vt_dev = hle_com_vtable(dv);
     g_vt_vp = hle_com_vtable(vp);
     g_vt_tex = hle_com_vtable(tx);
@@ -813,16 +939,19 @@ static void vtables(void) {
     g_vt_vb = hle_com_vtable(vb);
     g_d3d = hle_com_new(g_vt_d3d, 12);
     MEM32(g_d3d + 4) = 0;
+    g_d3d2 = hle_com_new(g_vt_d3d2, 12);
+    MEM32(g_d3d2 + 4) = 0;
 }
 
 uint32_t hle_d3d_query(const uint8_t *iid) {
     uint32_t d1;
     memcpy(&d1, iid, 4);
-    if (d1 != 0xBB223240u) return 0;                     /* IDirect3D3 only */
+    if (d1 != 0xBB223240u && d1 != 0x6AAE1EC1u) return 0;   /* IDirect3D3, IDirect3D2 */
     vtables();
-    MEM32(g_d3d + 4)++;
-    T("IDirect3D3 -> 0x%08X\n", g_d3d);
-    return g_d3d;
+    uint32_t o = d1 == 0xBB223240u ? g_d3d : g_d3d2;
+    MEM32(o + 4)++;
+    T("%s -> 0x%08X\n", d1 == 0xBB223240u ? "IDirect3D3" : "IDirect3D2", o);
+    return o;
 }
 uint32_t hle_d3d_surface_query(uint32_t surface, const uint8_t *iid) {
     uint32_t d1;

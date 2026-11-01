@@ -238,12 +238,24 @@ static uint32_t g_last_import_va;
  * entered through shim_entry: the lookup and the call are back to back on the
  * thread that holds the machine, so the index passes through a global. */
 static volatile uint32_t g_pending_shim;
+/* HLE_WATCH=<hex guest VA>: report the shim during which, or the guest code
+ * between shims in which, the dword there changes (a debugging aid). */
+static uint32_t g_watch_va, g_watch_val;
+static int g_watch_init;
+static void watch(const char *when, const char *name) {
+    if (!g_watch_init) { const char *w = getenv("HLE_WATCH"); g_watch_init = 1; if (w) g_watch_va = (uint32_t)strtoul(w, NULL, 16), g_watch_val = MEM32(g_watch_va); }
+    if (!g_watch_va) return;
+    uint32_t v = MEM32(g_watch_va);
+    if (v != g_watch_val) { fprintf(stderr, "[watch] 0x%08X: 0x%08X -> 0x%08X %s %s (guest 0x%08X)\n", g_watch_va, g_watch_val, v, when, name, g_last_import_va); g_watch_val = v; }
+}
 static void shim_entry(void) {
     uint32_t i = g_pending_shim;
     if (g_waiters) hle_yield();
     g_last_import_va = g_shim[i].va;                     /* again: the thread that ran meanwhile set its own */
     g_cur_import = g_shim[i].name;
+    watch("before", g_shim[i].name);
     g_shim[i].fn();
+    watch("during", g_shim[i].name);
 }
 recomp_func_t recomp_lookup_import(uint32_t va) {
     if (va < SHIM_BASE || va >= SHIM_BASE + SHIM_STEP * (uint32_t)g_shim_n) return NULL;
